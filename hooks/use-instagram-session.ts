@@ -35,6 +35,10 @@ export function useInstagramSession() {
                         setProfilePic(data.profilePic || null)
                         // Remove code from URL
                         router.replace("/dashboard")
+                    } else if (res.status === 403) {
+                        // Account is not in ALLOWED_INSTAGRAM_USERNAMES
+                        router.replace("/")
+                        return
                     }
                 } catch (err) {
                     console.error("Login failed:", err)
@@ -46,9 +50,22 @@ export function useInstagramSession() {
                 const savedName = localStorage.getItem("ig_username")
 
                 if (savedId && savedName) {
-                    setUserId(savedId)
-                    setUsername(savedName)
-                    setProfilePic(localStorage.getItem("ig_profile_pic"))
+                    // localStorage alone proves nothing; the signed session cookie must still be valid
+                    const res = await fetch("/api/session").catch(() => null)
+                    if (res?.ok) {
+                        setUserId(savedId)
+                        setUsername(savedName)
+                        setProfilePic(localStorage.getItem("ig_profile_pic"))
+                    } else {
+                        localStorage.removeItem("ig_user_id")
+                        localStorage.removeItem("ig_username")
+                        localStorage.removeItem("ig_profile_pic")
+                        router.replace("/")
+                        return
+                    }
+                } else {
+                    router.replace("/")
+                    return
                 }
             }
             setIsLoading(false)
@@ -58,6 +75,7 @@ export function useInstagramSession() {
     }, [searchParams, router])
 
     const logout = () => {
+        fetch("/api/session", { method: "DELETE" }).catch(() => {})
         localStorage.removeItem("ig_user_id")
         localStorage.removeItem("ig_username")
         localStorage.removeItem("ig_profile_pic")

@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServerClient } from "@/lib/supabase-server"
+import { SESSION_COOKIE, SESSION_MAX_AGE, createSessionToken, isAllowedUsername } from "@/lib/session"
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
@@ -97,6 +98,12 @@ export async function POST(request: NextRequest) {
       console.error("[v0] /me request failed:", e)
     }
 
+    // 5. Only let allowlisted accounts in, before their token is stored
+    if (!isAllowedUsername(username)) {
+      console.warn(`[callback] Login refused for @${username}: not in ALLOWED_INSTAGRAM_USERNAMES`)
+      return NextResponse.json({ error: `@${username} is not allowed to use this dashboard` }, { status: 403 })
+    }
+
     // 6. Save/Update User
     const supabase = await getSupabaseServerClient()
 
@@ -121,6 +128,14 @@ export async function POST(request: NextRequest) {
     response.cookies.set("insta_session", JSON.stringify({ username, userId: loginUserId }), {
       path: "/",
       maxAge: expiresIn,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    })
+    // The signed cookie is what the proxy checks on every dashboard API call
+    response.cookies.set(SESSION_COOKIE, await createSessionToken(loginUserId), {
+      path: "/",
+      maxAge: SESSION_MAX_AGE,
+      httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
     })
