@@ -124,6 +124,24 @@ export async function POST(request: NextRequest) {
 
     if (upsertError) throw upsertError
 
+    // 7. Subscribe this account to the app's webhooks. With Instagram Login, Meta only sends
+    // comment and DM events for accounts that called /me/subscribed_apps; the app-level webhook
+    // alone is not enough. Idempotent, so it runs on every login.
+    try {
+      const subRes = await fetch(
+        `https://graph.instagram.com/v24.0/me/subscribed_apps?subscribed_fields=comments,messages,messaging_postbacks,message_reactions&access_token=${accessToken}`,
+        { method: "POST" },
+      )
+      const subData = await subRes.json()
+      if (!subRes.ok || subData.success !== true) {
+        console.error(`[callback] Webhook subscription failed for @${username}:`, JSON.stringify(subData))
+      } else {
+        console.log(`[callback] Webhook subscription active for @${username}`)
+      }
+    } catch (e) {
+      console.error("[callback] Webhook subscription request failed:", e)
+    }
+
     const response = NextResponse.json({ success: true, username, userId: loginUserId, profilePic })
     response.cookies.set("insta_session", JSON.stringify({ username, userId: loginUserId }), {
       path: "/",
