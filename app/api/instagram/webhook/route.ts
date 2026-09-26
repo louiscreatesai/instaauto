@@ -37,7 +37,24 @@ function isValidSignature(rawBody: string, signatureHeader: string | null): bool
   })
 }
 
-const DEFAULT_PUBLIC_REPLIES = ["Check your DMs! 📥", "Sent! 🔥", "Check inbox! ✨"]
+// Private replies to a comment land in the commenter's Message requests, not their main inbox,
+// so the public reply tells them where to look. A few versions rotate so it doesn't read as spam.
+const DEFAULT_PUBLIC_REPLIES = [
+  "Sent! 📩 Not in your DMs? Check your message requests",
+  "Just sent it 📩 If you can't see it, look in your message requests",
+  "Check your DMs 📩 It might be sitting in your message requests",
+  "Sent you a message 📩 Check your requests folder if it's not in your inbox",
+]
+
+// When the DM itself fails (usually because the commenter's messages are closed), the public reply
+// asks them to message the keyword instead. A DM that contains a comment rule's keyword gets that
+// rule's answer (see PART B), so this always leads somewhere.
+function dmFailedReplies(keyword: string): string[] {
+  return [
+    `I couldn't message you, your DMs might be closed 🙈 Send me a DM saying ${keyword} and I'll send it right away`,
+    `My DM didn't go through 🙈 Message me the word ${keyword} and I'll send it straight back`,
+  ]
+}
 
 // Max times we'll send the gate card for an unverifiable follow status on a single unlock event.
 // After this, we send a single "couldn't verify your follow" message and stop spamming the user.
@@ -365,29 +382,24 @@ export async function POST(request: NextRequest) {
                     // replies to a comment need comment_id.
                     let dmResult: any = null
                     let followCheck: any = null
-                    if (content.check_follow === true) {
-                      const followResult = await verifyFollowStatus(senderId, user.access_token)
-                      followCheck = followResult
-
-                      if (followResult.follows === true) {
-                        console.log(`[webhook] ✅ Comment follower gate: @${senderId} follows @${user.username} — sending content`)
-                        if (replyMode !== "dm_only") {
-                          await replyToComment(user.access_token, commentId, getPublicReply())
-                        }
-                        if (replyMode !== "public_only") {
-                          dmResult = await sendAutomationResponse(
-                            user.access_token,
-                            { comment_id: commentId },
-                            content,
-                            { skipTyping: true },
-                          )
-                        }
-                      } else if (followResult.follows === false) {
-                        console.log(`[webhook] 🔒 Comment follower gate: @${senderId} doesn't follow @${user.username}`)
-                        if (replyMode !== "dm_only") {
-                          await replyToComment(user.access_token, commentId, getPublicReply())
-                        }
-                        if (replyMode !== "public_only") {
+                    if (replyMode !== "public_only") {
+                      if (content.check_follow === true) {
+                        const followResult = await verifyFollowStatus(senderId, user.access_token)
+                        followCheck = followResult
+                        if (followResult.follows === true) {
+                          console.log(`[webhook] ✅ Comment follower gate: @${senderId} follows @${user.username} — sending content`)
+                          dmResult = await sendAutomationResponse(user.access_token, { comment_id: commentId }, content, { skipTyping: true })
+                        } else {
+                          // false, or null (unverifiable). For a commenter null is the usual case, not a glitch:
+                          // Instagram won't report is_user_follow_business for someone who has never
+                          // messaged the account, so failing open would hand the content to every
+                          // first-time non-follower. Send the gate; tapping "I Followed" starts a
+                          // conversation, and the unlock path in PART B can verify the follow from there.
+                          if (followResult.follows === false) {
+                            console.log(`[webhook] 🔒 Comment follower gate: @${senderId} doesn't follow @${user.username}`)
+                          } else {
+                            console.warn(`[webhook] ⚠️ Comment follower gate unverifiable (${followResult.error}) for @${senderId}; sending gate`)
+                          }
                           dmResult = await sendCardDM(
                             user.access_token,
                             { comment_id: commentId },
@@ -395,37 +407,18 @@ export async function POST(request: NextRequest) {
                           )
                         }
                       } else {
-                        // null → unverifiable. For a commenter this is the usual case, not a glitch:
-                        // Instagram won't report is_user_follow_business for someone who has never
-                        // messaged the account (it answers 400, "user consent required"), so failing
-                        // open here would hand the content to every first-time non-follower. Send the
-                        // gate instead; tapping "I Followed" starts a conversation, and the unlock
-                        // path in PART B can verify the follow from there.
-                        console.warn(`[webhook] ⚠️ Comment follower gate unverifiable (${followResult.error}) for @${senderId}; sending gate`)
-                        if (replyMode !== "dm_only") {
-                          await replyToComment(user.access_token, commentId, getPublicReply())
-                        }
-                        if (replyMode !== "public_only") {
-                          dmResult = await sendCardDM(
-                            user.access_token,
-                            { comment_id: commentId },
-                            buildFollowGateCard({ username: user.username, ruleId: match.id }),
-                          )
-                        }
+                        dmResult = await sendAutomationResponse(user.access_token, { comment_id: commentId }, content, { skipTyping: true })
                       }
-                    } else {
-                      // No follower check required — send normally
-                      if (replyMode !== "dm_only") {
-                        await replyToComment(user.access_token, commentId, getPublicReply())
-                      }
-                      if (replyMode !== "public_only") {
-                        dmResult = await sendAutomationResponse(
-                          user.access_token,
-                          { comment_id: commentId },
-                          content,
-                          { skipTyping: true },
-                        )
-                      }
+                    }
+
+                    // Public reply after the DM, so it can say the right thing: where to find the message,
+                    // or (when the DM failed) how to get it by messaging the keyword.
+                    let publicResult: any = null
+                    if (replyMode !== "dm_only") {
+                      const dmFailed = replyMode !== "public_only" && dmResult && dmResult.ok === false
+                      const keyword = (String(match.trigger_value || "").split(",")[0] || "").trim().toUpperCase()
+                      const text = dmFailed && keyword ? pickRandom(dmFailedReplies(keyword)) : getPublicReply()
+                      publicResult = await replyToComment(user.access_token, commentId, text)
                     }
                     await logEvent(supabase, "comment_dm", user.id, {
                       automation: match.name,
@@ -435,6 +428,7 @@ export async function POST(request: NextRequest) {
                       reply_mode: replyMode,
                       follow_check: followCheck,
                       dm: dmResult,
+                      public_reply: publicResult,
                     })
         }
       }
@@ -640,6 +634,14 @@ export async function POST(request: NextRequest) {
                       match = dmAutomations.find(
                         (a) => a.trigger_type === "keyword" && keywordMatches(a.trigger_value, triggerValue),
                       )
+                      // A commenter whose messages are closed is told to DM the keyword instead, so a DM
+                      // with a comment rule's keyword gets that rule's answer (follow gate included).
+                      if (!match) {
+                        match = automations.find(
+                          (a: any) => a.trigger_source === "comment" && a.trigger_type === "keyword" && keywordMatches(a.trigger_value, triggerValue),
+                        )
+                        if (match) console.log(`[webhook] ↪️ DM keyword matched comment rule "${match.name}"`)
+                      }
                     }
 
                     if (!match) {

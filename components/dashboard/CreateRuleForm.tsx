@@ -524,8 +524,8 @@ export function CreateRuleForm({ userId, triggerSource, onSuccess, editRule }: C
               {triggerSource === "comment" && replyMode !== "dm_only" && (
                 <div className="space-y-2 bg-muted/40 p-5 rounded-2xl border border-border">
                   <FieldLabel>Public comments rotation</FieldLabel>
-                  <p className="text-[11px] text-muted-foreground mb-3">Add multiple phrases. We rotate them dynamically to look human.</p>
-                  <TagInput value={publicReplies} onChange={setPublicReplies} placeholder={'e.g. "Sent you a DM!", "Check your inbox!"'} />
+                  <p className="text-[11px] text-muted-foreground mb-3">Add multiple phrases. We rotate them dynamically to look human. Leave it empty to use the built-in ones, which tell people to check their message requests. If the DM can't be delivered (closed messages), the reply asks them to DM you the keyword instead, and that DM gets the same answer.</p>
+                  <TagInput value={publicReplies} onChange={setPublicReplies} placeholder={'e.g. "Sent! Check your message requests"'} />
                 </div>
               )}
 
