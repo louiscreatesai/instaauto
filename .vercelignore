@@ -1,0 +1,6 @@
+# Local secrets and helpers never go to Vercel (the build gets its settings from the project's env vars)
+.env*
+!.env.example
+.secrets.local
+save-app-secret.*
+supabase/.temp
