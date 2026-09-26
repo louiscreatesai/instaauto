@@ -2,11 +2,12 @@ export default function PrivacyPage() {
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
       <h1 className="text-3xl font-bold mb-6">Privacy Policy</h1>
-      <p className="text-sm text-muted-foreground mb-8">Last updated: July 2026</p>
+      <p className="text-sm text-muted-foreground mb-8">Last updated: September 2026</p>
 
       <section className="space-y-4">
         <p>
-          This app (&quot;Insta P8&quot;) is owned and operated by <strong>ayuuxh labs</strong>. The app uses the Instagram Graph API to help users manage
+          This app (&quot;LouisCreatesAI DM&quot;) is run by <strong>@louiscreates.ai</strong> for its own Instagram account. It is built on the
+          open-source InstaAuto project. The app uses the Instagram Graph API to help users manage
           their Instagram account, including posting reels, auto-replying to
           messages, and viewing analytics.
         </p>
@@ -33,9 +34,16 @@ export default function PrivacyPage() {
           which will remove the stored tokens.
         </p>
 
+        <h2 className="text-xl font-semibold mt-6">Deleting Your Data</h2>
+        <p>
+          If you commented on or messaged @louiscreates.ai and want the data this app stored about you deleted
+          (your Instagram user ID and the messages exchanged), send a direct message to @louiscreates.ai on Instagram
+          saying &quot;delete my data&quot;. It is removed within 30 days and you get a confirmation reply.
+        </p>
+
         <h2 className="text-xl font-semibold mt-6">Contact</h2>
         <p>
-          For any questions, please reach out via the app dashboard or email at flexhunt1@gmail.com.
+          For any questions, send a direct message to @louiscreates.ai on Instagram.
         </p>
       </section>
     </div>
