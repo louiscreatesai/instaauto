@@ -364,8 +364,10 @@ export async function POST(request: NextRequest) {
                     // alone won't open a DM with someone who has never messaged the account; private
                     // replies to a comment need comment_id.
                     let dmResult: any = null
+                    let followCheck: any = null
                     if (content.check_follow === true) {
                       const followResult = await verifyFollowStatus(senderId, user.access_token)
+                      followCheck = followResult
 
                       if (followResult.follows === true) {
                         console.log(`[webhook] ✅ Comment follower gate: @${senderId} follows @${user.username} — sending content`)
@@ -393,35 +395,22 @@ export async function POST(request: NextRequest) {
                           )
                         }
                       } else {
-                        // null → unverifiable. Distinguish auth vs transient.
-                        const isAuthError = followResult.error === 'auth'
-                        if (isAuthError) {
-                          // Auth/permission failure — fail CLOSED: send gate card
-                          console.warn(`[webhook] ⚠️ Comment follower gate auth failure for @${senderId}; sending gate`)
-                          if (replyMode !== "dm_only") {
-                            await replyToComment(user.access_token, commentId, getPublicReply())
-                          }
-                          if (replyMode !== "public_only") {
-                            dmResult = await sendCardDM(
-                              user.access_token,
-                              { comment_id: commentId },
-                              buildFollowGateCard({ username: user.username, ruleId: match.id }),
-                            )
-                          }
-                        } else {
-                          // Transient failure — fail OPEN: deliver content (with public reply if allowed)
-                          console.warn(`[webhook] ⚠️ Comment follower gate transient failure for @${senderId}; failing open`)
-                          if (replyMode !== "dm_only") {
-                            await replyToComment(user.access_token, commentId, getPublicReply())
-                          }
-                          if (replyMode !== "public_only") {
-                            dmResult = await sendAutomationResponse(
-                              user.access_token,
-                              { comment_id: commentId },
-                              content,
-                              { skipTyping: true },
-                            )
-                          }
+                        // null → unverifiable. For a commenter this is the usual case, not a glitch:
+                        // Instagram won't report is_user_follow_business for someone who has never
+                        // messaged the account (it answers 400, "user consent required"), so failing
+                        // open here would hand the content to every first-time non-follower. Send the
+                        // gate instead; tapping "I Followed" starts a conversation, and the unlock
+                        // path in PART B can verify the follow from there.
+                        console.warn(`[webhook] ⚠️ Comment follower gate unverifiable (${followResult.error}) for @${senderId}; sending gate`)
+                        if (replyMode !== "dm_only") {
+                          await replyToComment(user.access_token, commentId, getPublicReply())
+                        }
+                        if (replyMode !== "public_only") {
+                          dmResult = await sendCardDM(
+                            user.access_token,
+                            { comment_id: commentId },
+                            buildFollowGateCard({ username: user.username, ruleId: match.id }),
+                          )
                         }
                       }
                     } else {
@@ -444,6 +433,7 @@ export async function POST(request: NextRequest) {
                       comment_id: commentId,
                       from: change.value.from.username ?? senderId,
                       reply_mode: replyMode,
+                      follow_check: followCheck,
                       dm: dmResult,
                     })
         }
