@@ -70,6 +70,17 @@ function parseContent(raw: any) {
   return raw
 }
 
+// A short record of what happened to each comment (matched, DM sent or the Instagram error),
+// readable at /api/instagram/events. Function logs only last an hour on Vercel Hobby.
+async function logEvent(supabase: any, eventType: string, userId: string | number | null, data: any) {
+  try {
+    const { error } = await supabase.from("webhook_events").insert({ event_type: eventType, user_id: userId, data })
+    if (error) console.warn("[webhook] event log failed:", error.message)
+  } catch (e: any) {
+    console.warn("[webhook] event log failed:", e?.message)
+  }
+}
+
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
@@ -191,6 +202,11 @@ export async function POST(request: NextRequest) {
         `[webhook] 401: ${!signature ? "no x-hub-signature-256 header" : "signature mismatch"}; ` +
           `secrets configured: ${APP_SECRETS.length}; received=${signature?.slice(7, 19) ?? "-"} computed=[${computed}] bodyLen=${rawBody.length}`,
       )
+      await logEvent(await getSupabaseServerClient(), "signature_failed", null, {
+        has_signature: !!signature,
+        secrets_configured: APP_SECRETS.length,
+        body_length: rawBody.length,
+      })
       if (process.env.DISABLE_WEBHOOK_SIGNATURE_CHECK === "true") {
         console.warn("[webhook] SIGNATURE CHECK BYPASSED — remove DISABLE_WEBHOOK_SIGNATURE_CHECK after debugging")
       } else {
@@ -264,6 +280,7 @@ export async function POST(request: NextRequest) {
 
       if (!user) {
         console.log(`[webhook] ❌ Could not resolve user for ID ${webhookId}`)
+        await logEvent(supabase, "unresolved_account", null, { id: webhookId })
         continue
       }
 
@@ -288,7 +305,10 @@ export async function POST(request: NextRequest) {
           const mediaId = change.value.media.id
           const parentId = change.value.parent_id || null
 
-          if (senderId === webhookId || senderId === user.business_account_id || senderId === user.page_id) continue
+          if (senderId === webhookId || senderId === user.business_account_id || senderId === user.page_id) {
+            await logEvent(supabase, "comment_own", user.id, { media_id: mediaId, comment_id: commentId })
+            continue
+          }
 
           const commentAutomations = automations.filter((a: any) => a.trigger_source === "comment")
 
@@ -312,12 +332,18 @@ export async function POST(request: NextRequest) {
                 keywordMatches(a.trigger_value, commentText),
             )
           }
-          if (!match) continue
+          if (!match) {
+            await logEvent(supabase, "comment_no_match", user.id, { media_id: mediaId, text: commentText.slice(0, 80) })
+            continue
+          }
 
                     const content = parseContent(match.response_content)
 
                     // Skip nested replies unless user opted in
-                    if (parentId && content.include_replies !== true) continue
+                    if (parentId && content.include_replies !== true) {
+                      await logEvent(supabase, "comment_reply_skipped", user.id, { media_id: mediaId, automation: match.name })
+                      continue
+                    }
 
                     console.log(`[webhook] ✅ Comment match: "${match.name}"`)
 
@@ -337,6 +363,7 @@ export async function POST(request: NextRequest) {
                     // The gate card is delivered as a *private reply* to the comment. recipient.id
                     // alone won't open a DM with someone who has never messaged the account; private
                     // replies to a comment need comment_id.
+                    let dmResult: any = null
                     if (content.check_follow === true) {
                       const followResult = await verifyFollowStatus(senderId, user.access_token)
 
@@ -346,7 +373,7 @@ export async function POST(request: NextRequest) {
                           await replyToComment(user.access_token, commentId, getPublicReply())
                         }
                         if (replyMode !== "public_only") {
-                          await sendAutomationResponse(
+                          dmResult = await sendAutomationResponse(
                             user.access_token,
                             { comment_id: commentId },
                             content,
@@ -359,7 +386,7 @@ export async function POST(request: NextRequest) {
                           await replyToComment(user.access_token, commentId, getPublicReply())
                         }
                         if (replyMode !== "public_only") {
-                          await sendCardDM(
+                          dmResult = await sendCardDM(
                             user.access_token,
                             { comment_id: commentId },
                             buildFollowGateCard({ username: user.username, ruleId: match.id }),
@@ -375,7 +402,7 @@ export async function POST(request: NextRequest) {
                             await replyToComment(user.access_token, commentId, getPublicReply())
                           }
                           if (replyMode !== "public_only") {
-                            await sendCardDM(
+                            dmResult = await sendCardDM(
                               user.access_token,
                               { comment_id: commentId },
                               buildFollowGateCard({ username: user.username, ruleId: match.id }),
@@ -388,7 +415,7 @@ export async function POST(request: NextRequest) {
                             await replyToComment(user.access_token, commentId, getPublicReply())
                           }
                           if (replyMode !== "public_only") {
-                            await sendAutomationResponse(
+                            dmResult = await sendAutomationResponse(
                               user.access_token,
                               { comment_id: commentId },
                               content,
@@ -403,7 +430,7 @@ export async function POST(request: NextRequest) {
                         await replyToComment(user.access_token, commentId, getPublicReply())
                       }
                       if (replyMode !== "public_only") {
-                        await sendAutomationResponse(
+                        dmResult = await sendAutomationResponse(
                           user.access_token,
                           { comment_id: commentId },
                           content,
@@ -411,6 +438,14 @@ export async function POST(request: NextRequest) {
                         )
                       }
                     }
+                    await logEvent(supabase, "comment_dm", user.id, {
+                      automation: match.name,
+                      media_id: mediaId,
+                      comment_id: commentId,
+                      from: change.value.from.username ?? senderId,
+                      reply_mode: replyMode,
+                      dm: dmResult,
+                    })
         }
       }
 
