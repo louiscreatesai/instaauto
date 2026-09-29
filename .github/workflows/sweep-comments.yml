@@ -1,0 +1,19 @@
+name: Sweep missed keyword comments
+
+# Instagram sometimes never sends the comment webhook (seen on a new reel on 2026-09-29).
+# Every 5 minutes this calls the sweeper, which DMs keyword commenters that got nothing.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call the sweeper
+        run: |
+          curl -fsS --max-time 90 \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://louiscreatesai-dm.vercel.app/api/cron/sweep-comments

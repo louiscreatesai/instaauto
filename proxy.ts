@@ -1,10 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session"
 
-// API routes that are called without a dashboard session: Meta's webhook deliveries and the
-// Instagram login flow. test-login refuses to run in production on its own.
+// API routes that are called without a dashboard session: Meta's webhook deliveries, the
+// Instagram login flow and the comment sweeper (it checks CRON_SECRET itself).
+// test-login refuses to run in production on its own.
 const PUBLIC_API_ROUTES = new Set([
   "/api/instagram/webhook",
+  "/api/cron/sweep-comments",
   "/api/instagram/callback",
   "/api/instagram/test-login",
 ])
